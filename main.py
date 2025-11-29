@@ -35,24 +35,25 @@ class TextColor(Enum):
 def color_text(text: str, color: TextColor) -> str:
     return f"\033[{color.value}m{text}\033[{TextStyle.RESET.value}m"
 
-
 def style_text(text: str, style: TextStyle) -> str:
     return f"\033[{style.value}m{text}\033[{TextStyle.RESET.value}m"
 
-
 def get_log_file_path() -> str:
-    default_log_file_path = "/var/lib/remna/access.log"
+    default_log_file_path = "/var/lib/marzban/access.log"
+    
+    # Если файл существует по дефолтному пути, возвращаем его без вопросов (для автоматизации)
+    # Если вы хотите всегда спрашивать - раскомментируйте input ниже, но для pipe это может быть неудобно
+    if os.path.exists(default_log_file_path):
+         return default_log_file_path
+
     while True:
         user_input_path = input(
             f"Укажите путь до логов (нажмите Enter для использования '{default_log_file_path}'): "
         ).strip()
         log_file_path = user_input_path or default_log_file_path
-
         if os.path.exists(log_file_path):
             return log_file_path
-
         print(f"Ошибка: файл по пути '{log_file_path}' не существует.")
-
 
 def clear_screen():
     os.system('clear' if os.name == 'posix' else 'cls')
@@ -60,7 +61,6 @@ def clear_screen():
 def download_geoip_db(db_url: str, db_path: str, without_update: bool):
     """Загружает GeoIP базу только если файл отсутствует или старше 7 дней"""
     needs_download = False
-    
     if not os.path.exists(db_path):
         needs_download = True
     else:
@@ -73,7 +73,7 @@ def download_geoip_db(db_url: str, db_path: str, without_update: bool):
             print(f"{color_text('Удаление устаревшей базы данных:', TextColor.BRIGHT_YELLOW)} {db_path}")
             os.remove(db_path)
             needs_download = True
-    
+
     if needs_download:
         print(color_text(f"Скачивание базы данных из {db_url}...", TextColor.BRIGHT_GREEN))
         try:
@@ -96,12 +96,14 @@ def parse_log_entry(log, filter_ip_resource, city_reader, asn_reader):
         ip = match.group("ip") or "Unknown IP"
         if ip in {"@", "unix:@"}:
             ip = "Unknown IP"
+        
         email = match.group("email") or "Unknown Email"
         resource = match.group("resource")
         destination = match.group("destination")
 
         ipv4_pattern = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
         ipv6_pattern = re.compile(r"^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$")
+
         if filter_ip_resource:
             if ipv4_pattern.match(resource) or ipv6_pattern.match(resource):
                 return None
@@ -110,13 +112,12 @@ def parse_log_entry(log, filter_ip_resource, city_reader, asn_reader):
                 region_asn = get_region_and_asn(resource, city_reader, asn_reader)
                 country = region_asn.split(",")[0]
                 if country in {"Russia", "Belarus"}:
-                    resource = color_text(f"{resource} ({country})", TextColor.BRIGHT_RED)
+                     resource = color_text(f"{resource} ({country})", TextColor.BRIGHT_RED)
                 else:
-                    resource = f"{resource} ({country})"
+                     resource = f"{resource} ({country})"
 
         return ip, email, resource, destination
     return None
-
 
 def extract_email_number(email: str):
     """
@@ -127,6 +128,7 @@ def extract_email_number(email: str):
     """
     if email == "Unknown Email":
         return (2, '')
+    
     match = re.match(r"^(\d+)\..*", email)
     if match:
         num = int(match.group(1))
@@ -134,14 +136,11 @@ def extract_email_number(email: str):
     else:
         return (1, email)
 
-
 def highlight_email(email):
     return color_text(email, TextColor.BRIGHT_GREEN)
 
-
 def highlight_ip(ip):
     return color_text(ip, TextColor.BLUE)
-
 
 def highlight_resource(resource):
     highlight_domains = {
@@ -161,25 +160,26 @@ def highlight_resource(resource):
     }
 
     if any(resource == domain or resource.endswith("." + domain) for domain in highlight_domains) \
-            or re.search(r"\.ru$|\.ru.com$|\.su$|\.by$|[а-яА-Я]", resource) \
-            or "xn--" in resource:
+       or re.search(r"\.ru$|\.ru.com$|\.su$|\.by$|[а-яА-Я]", resource) \
+       or "xn--" in resource:
         return color_text(resource, TextColor.RED)
-
+    
     if any(resource == domain or resource.endswith("." + domain) for domain in questinable_domains) \
-            or re.search(r"\.cn$|\.citic$|\.baidu$|\.sohu$|\.unicom$", resource):
+       or re.search(r"\.cn$|\.citic$|\.baidu$|\.sohu$|\.unicom$", resource):
         return color_text(resource, TextColor.YELLOW)
-
+        
     return resource
-
 
 def get_region_and_asn(ip, city_reader, asn_reader):
     if ip == "Unknown IP":
         return "Unknown Country, Unknown Region, Unknown ASN"
+    
     if ip in region_asn_cache:
         return region_asn_cache[ip]
 
     unknown_country = "Unknown Country"
     unknown_region = "Unknown Region"
+
     try:
         city_response = city_reader.city(ip)
         country = city_response.country.name or unknown_country
@@ -198,7 +198,6 @@ def get_region_and_asn(ip, city_reader, asn_reader):
     region_asn_cache[ip] = result
     return result
 
-
 def process_logs(logs_iterator, city_reader, asn_reader, filter_ip_resource):
     data = defaultdict(lambda: defaultdict(dict))
     for log in logs_iterator:
@@ -208,7 +207,6 @@ def process_logs(logs_iterator, city_reader, asn_reader, filter_ip_resource):
             region_asn = get_region_and_asn(ip, city_reader, asn_reader)
             data[email].setdefault(ip, {"region_asn": region_asn, "resources": {}})["resources"][resource] = destination
     return data
-
 
 def process_summary(logs_iterator, city_reader, asn_reader, filter_ip_resource):
     summary = defaultdict(set)
@@ -221,7 +219,6 @@ def process_summary(logs_iterator, city_reader, asn_reader, filter_ip_resource):
             regions[ip] = get_region_and_asn(ip, city_reader, asn_reader)
     return {email: (ips, regions) for email, ips in summary.items()}
 
-
 def print_sorted_logs(data):
     for email in sorted(data.keys(), key=extract_email_number):
         print(f"Email: {highlight_email(email)}")
@@ -229,7 +226,6 @@ def print_sorted_logs(data):
             print(f"  IP: {highlight_ip(ip)} ({info['region_asn']})")
             for resource, destination in sorted(info["resources"].items()):
                 print(f"    Resource: {highlight_resource(resource)} -> [{destination}]")
-
 
 def print_summary(summary):
     for email in sorted(summary.keys(), key=extract_email_number):
@@ -241,7 +237,6 @@ def print_summary(summary):
         for ip in sorted(ips):
             print(f"  IP: {highlight_ip(ip)} ({regions[ip]})")
 
-
 def extract_ip_from_foreign(foreign):
     if foreign in {"@", "unix:@"}:
         return "Unknown IP"
@@ -252,7 +247,6 @@ def extract_ip_from_foreign(foreign):
     if len(parts) == 2 and parts[1].isdigit():
         return parts[0]
     return "Unknown IP"
-
 
 def process_online_mode(logs_iterator, city_reader, asn_reader):
     ip_last_email = {}
@@ -296,16 +290,31 @@ def process_online_mode(logs_iterator, city_reader, asn_reader):
         print("Нет ESTABLISHED соединений, найденных в логах.")
 
 def main(arguments: Namespace):
-    # Определяем директорию скрипта и создаём папку для geo баз
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    geo_dir = os.path.join(script_dir, 'geo')
-    os.makedirs(geo_dir, exist_ok=True)
+    # 1. Определяем директорию скрипта или кэша
+    current_file = os.path.abspath(__file__)
+    
+    # Проверяем, запущен ли скрипт через pipe/fd или файл не существует на диске
+    if current_file.startswith("/dev/fd/") or not os.path.exists(current_file):
+        # Используем ~/.cache/xray-access-view
+        base_dir = os.path.expanduser("~/.cache/xray-access-view")
+    else:
+        # Используем директорию, где лежит скрипт
+        base_dir = os.path.dirname(current_file)
+
+    geo_dir = os.path.join(base_dir, 'geo')
+    
+    # 2. Создаём папку, если её нет. Если нет прав - фоллбэк на /tmp
+    try:
+        os.makedirs(geo_dir, exist_ok=True)
+    except OSError as e:
+        print(f"Предупреждение: Не удалось создать {geo_dir} ({e}). Используем /tmp/xray-access-view-geo")
+        geo_dir = "/tmp/xray-access-view-geo"
+        os.makedirs(geo_dir, exist_ok=True)
     
     # Формируем пути к базам данных
     city_db_path = os.path.join(geo_dir, "GeoLite2-City.mmdb")
     asn_db_path = os.path.join(geo_dir, "GeoLite2-ASN.mmdb")
     
-    # Корректные URL без лишних пробелов
     city_db_url = "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
     asn_db_url = "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb"
 
@@ -363,4 +372,3 @@ if __name__ == "__main__":
         main(args)
     except KeyboardInterrupt:
         pass
-      
