@@ -31,7 +31,6 @@ apt install python3-geoip2
 ```bash
 python3 <(curl -sL https://github.com/jager19111/xray-access-view/raw/main/main.py)
 ```
-![image](static/output.jpg)
 
 ### Запуск в основном режиме с выводом не только доменов, но и ip
 ```bash
@@ -42,7 +41,6 @@ python3 <(curl -sL https://github.com/jager19111/xray-access-view/raw/main/main.
 ```bash
 python3 <(curl -sL https://github.com/jager19111/xray-access-view/raw/main/main.py) --summary
 ```
-![image](static/summary-output.jpg)
 
 ### Запуск в режиме сводки, с выводом только тех ip, что сейчас подключены к серверу
 ```bash
@@ -50,7 +48,7 @@ python3 <(curl -sL https://github.com/jager19111/xray-access-view/raw/main/main.
 ```
 ---
 #### Доступ к логам
-По умолчанию используется путь '/var/lib/marzban/access.log', если вы хотите использовать свой путь, во время запуска скрипта следуйте следующему:
+По умолчанию используется путь '/var/lib/remna/access.log', если вы хотите использовать свой путь, во время запуска скрипта следуйте следующему:
 ```
 Укажите путь до логов (нажмите Enter для использования '/var/lib/remna/access.log'): /my/path/access.log
 ```
