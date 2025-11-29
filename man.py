@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+import sys
 import urllib.request
 from argparse import Namespace
 from collections import defaultdict
@@ -8,6 +9,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import geoip2.database
 
+# --- Глобальные переменные и настройки ---
 region_asn_cache = {}
 
 class TextStyle(Enum):
@@ -32,17 +34,20 @@ class TextColor(Enum):
     BRIGHT_CYAN = 96
     BRIGHT_WHITE = 97
 
+# --- Функции оформления ---
 def color_text(text: str, color: TextColor) -> str:
     return f"\033[{color.value}m{text}\033[{TextStyle.RESET.value}m"
 
 def style_text(text: str, style: TextStyle) -> str:
     return f"\033[{style.value}m{text}\033[{TextStyle.RESET.value}m"
 
+def clear_screen():
+    os.system('clear' if os.name == 'posix' else 'cls')
+
+# --- Функции работы с путями и файлами ---
 def get_log_file_path() -> str:
     default_log_file_path = "/var/lib/remna/access.log"
     
-    # Если файл существует по дефолтному пути, возвращаем его без вопросов (для автоматизации)
-    # Если вы хотите всегда спрашивать - раскомментируйте input ниже, но для pipe это может быть неудобно
     if os.path.exists(default_log_file_path):
          return default_log_file_path
 
@@ -55,9 +60,6 @@ def get_log_file_path() -> str:
             return log_file_path
         print(f"Ошибка: файл по пути '{log_file_path}' не существует.")
 
-def clear_screen():
-    os.system('clear' if os.name == 'posix' else 'cls')
-
 def download_geoip_db(db_url: str, db_path: str, without_update: bool):
     """Загружает GeoIP базу только если файл отсутствует или старше 7 дней"""
     needs_download = False
@@ -67,7 +69,6 @@ def download_geoip_db(db_url: str, db_path: str, without_update: bool):
         if without_update:
             return
         
-        # Проверяем возраст файла
         file_time = datetime.fromtimestamp(os.path.getmtime(db_path))
         if datetime.now() - file_time > timedelta(days=7):
             print(f"{color_text('Удаление устаревшей базы данных:', TextColor.BRIGHT_YELLOW)} {db_path}")
@@ -82,8 +83,9 @@ def download_geoip_db(db_url: str, db_path: str, without_update: bool):
         except Exception as e:
             print(color_text(f"Ошибка загрузки: {str(e)}", TextColor.RED))
             if not os.path.exists(db_path):
-                exit(1)  # Критическая ошибка если файл не существует и не смог загрузиться
+                exit(1)
 
+# --- Парсинг и обработка данных ---
 def parse_log_entry(log, filter_ip_resource, city_reader, asn_reader):
     pattern = re.compile(
         r".*?(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) "
@@ -120,15 +122,8 @@ def parse_log_entry(log, filter_ip_resource, city_reader, asn_reader):
     return None
 
 def extract_email_number(email: str):
-    """
-    Возвращает кортеж для сортировки email:
-    (0, num, email) - для email с цифровым префиксом (например, "1.user@example.com")
-    (1, email)      - для обычных email без цифрового префикса
-    (2, '')         - для "Unknown Email"
-    """
     if email == "Unknown Email":
         return (2, '')
-    
     match = re.match(r"^(\d+)\..*", email)
     if match:
         num = int(match.group(1))
@@ -154,7 +149,6 @@ def highlight_resource(resource):
         "yandex.tm", "yandex.ua", "yandex.uz", "yandexcloud.net", "yastatic.net", "dodois.com", "dodois.io", "ekatox-ru.com",
         "jivosite.com", "showip.net", "kaspersky-labs.com", "kaspersky.com"
     }
-
     questinable_domains = {
         "alicdn.com", "xiaomi.net", "xiaomi.com", "mi.com", "miui.com"
     }
@@ -198,6 +192,7 @@ def get_region_and_asn(ip, city_reader, asn_reader):
     region_asn_cache[ip] = result
     return result
 
+# --- Процессинг логов ---
 def process_logs(logs_iterator, city_reader, asn_reader, filter_ip_resource):
     data = defaultdict(lambda: defaultdict(dict))
     for log in logs_iterator:
@@ -218,35 +213,6 @@ def process_summary(logs_iterator, city_reader, asn_reader, filter_ip_resource):
             summary[email].add(ip)
             regions[ip] = get_region_and_asn(ip, city_reader, asn_reader)
     return {email: (ips, regions) for email, ips in summary.items()}
-
-def print_sorted_logs(data):
-    for email in sorted(data.keys(), key=extract_email_number):
-        print(f"Email: {highlight_email(email)}")
-        for ip, info in sorted(data[email].items()):
-            print(f"  IP: {highlight_ip(ip)} ({info['region_asn']})")
-            for resource, destination in sorted(info["resources"].items()):
-                print(f"    Resource: {highlight_resource(resource)} -> [{destination}]")
-
-def print_summary(summary):
-    for email in sorted(summary.keys(), key=extract_email_number):
-        ips, regions = summary[email]
-        email_colored = highlight_email(email)
-        unique_ips_colored = (f"{color_text('Unique IPs:', TextColor.BRIGHT_YELLOW)} "
-                      f"{style_text(f'{len(ips)}', TextStyle.BOLD)}")
-        print(f"Email: {email_colored}, {unique_ips_colored}")
-        for ip in sorted(ips):
-            print(f"  IP: {highlight_ip(ip)} ({regions[ip]})")
-
-def extract_ip_from_foreign(foreign):
-    if foreign in {"@", "unix:@"}:
-        return "Unknown IP"
-    m = re.match(r"^(\d+\.\d+\.\d+\.\d+):\d+$", foreign)
-    if m:
-        return m.group(1)
-    parts = foreign.rsplit(":", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        return parts[0]
-    return "Unknown IP"
 
 def process_online_mode(logs_iterator, city_reader, asn_reader):
     ip_last_email = {}
@@ -289,25 +255,83 @@ def process_online_mode(logs_iterator, city_reader, asn_reader):
     else:
         print("Нет ESTABLISHED соединений, найденных в логах.")
 
+def extract_ip_from_foreign(foreign):
+    if foreign in {"@", "unix:@"}:
+        return "Unknown IP"
+    m = re.match(r"^(\d+\.\d+\.\d+\.\d+):\d+$", foreign)
+    if m:
+        return m.group(1)
+    parts = foreign.rsplit(":", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return parts[0]
+    return "Unknown IP"
+
+# --- Функции вывода ---
+def print_sorted_logs(data):
+    for email in sorted(data.keys(), key=extract_email_number):
+        print(f"Email: {highlight_email(email)}")
+        for ip, info in sorted(data[email].items()):
+            print(f"  IP: {highlight_ip(ip)} ({info['region_asn']})")
+            for resource, destination in sorted(info["resources"].items()):
+                print(f"    Resource: {highlight_resource(resource)} -> [{destination}]")
+
+def print_summary(summary):
+    for email in sorted(summary.keys(), key=extract_email_number):
+        ips, regions = summary[email]
+        email_colored = highlight_email(email)
+        unique_ips_colored = (f"{color_text('Unique IPs:', TextColor.BRIGHT_YELLOW)} "
+                      f"{style_text(f'{len(ips)}', TextStyle.BOLD)}")
+        print(f"Email: {email_colored}, {unique_ips_colored}")
+        for ip in sorted(ips):
+            print(f"  IP: {highlight_ip(ip)} ({regions[ip]})")
+
+# --- Меню и Main ---
+def show_menu(args: Namespace):
+    """Интерактивное меню выбора режима"""
+    print(color_text("\nДоступные режимы работы:", TextColor.BRIGHT_CYAN))
+    print(f" {color_text('1.', TextColor.BRIGHT_YELLOW)} Основной режим (скрывать IP в ресурсах, только домены)")
+    print(f" {color_text('2.', TextColor.BRIGHT_YELLOW)} Основной режим + IP (показывать всё)")
+    print(f" {color_text('3.', TextColor.BRIGHT_YELLOW)} Сводка (Summary)")
+    print(f" {color_text('4.', TextColor.BRIGHT_YELLOW)} Online (активные соединения)")
+    print(f" {color_text('0.', TextColor.BRIGHT_RED)} Выход")
+    
+    try:
+        choice = input(color_text("\nВыберите режим (1-4): ", TextColor.BRIGHT_WHITE)).strip()
+    except KeyboardInterrupt:
+        print("\nВыход.")
+        exit(0)
+        
+    if choice == '1':
+        # Default: args.ip = False, args.summary = False, args.online = False
+        pass 
+    elif choice == '2':
+        args.ip = True
+    elif choice == '3':
+        args.summary = True
+    elif choice == '4':
+        args.online = True
+    elif choice == '0':
+        exit(0)
+    else:
+        print(color_text("Неверный выбор. Запуск режима по умолчанию.", TextColor.RED))
+
 def main(arguments: Namespace):
     # 1. Определяем директорию скрипта или кэша
     current_file = os.path.abspath(__file__)
     
-    # Проверяем, запущен ли скрипт через pipe/fd или файл не существует на диске
     if current_file.startswith("/dev/fd/") or not os.path.exists(current_file):
-        # Используем ~/.cache/xray-access-view
+        # Используем ~/.cache/xray-access-view при запуске из pipe
         base_dir = os.path.expanduser("~/.cache/xray-access-view")
     else:
-        # Используем директорию, где лежит скрипт
+        # Используем директорию скрипта
         base_dir = os.path.dirname(current_file)
 
     geo_dir = os.path.join(base_dir, 'geo')
     
-    # 2. Создаём папку, если её нет. Если нет прав - фоллбэк на /tmp
     try:
         os.makedirs(geo_dir, exist_ok=True)
     except OSError as e:
-        print(f"Предупреждение: Не удалось создать {geo_dir} ({e}). Используем /tmp/xray-access-view-geo")
+        # Fallback если нет прав
         geo_dir = "/tmp/xray-access-view-geo"
         os.makedirs(geo_dir, exist_ok=True)
     
@@ -318,7 +342,6 @@ def main(arguments: Namespace):
     city_db_url = "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb"
     asn_db_url = "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb"
 
-    # Загружаем базы с учётом условий
     download_geoip_db(city_db_url, city_db_path, arguments.without_geolite_update)
     download_geoip_db(asn_db_url, asn_db_path, arguments.without_geolite_update)
 
@@ -347,7 +370,7 @@ def main(arguments: Namespace):
             print_sorted_logs(sorted_data)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Xray Access Log Viewer")
     parser.add_argument(
         "--summary",
         action="store_true",
@@ -368,7 +391,14 @@ if __name__ == "__main__":
         help="Не обновлять базы данных GeoLite в случае, если они существуют"
     )
     args = parser.parse_args()
+    
+    # Если аргументы не переданы (len(sys.argv) == 1), показываем меню
+    # Если переданы (например --online), сразу запускаем
+    if len(sys.argv) == 1:
+        show_menu(args)
+
     try:
         main(args)
     except KeyboardInterrupt:
+        print("\nПрервано пользователем.")
         pass
