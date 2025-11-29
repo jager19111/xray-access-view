@@ -39,7 +39,7 @@ def style_text(text: str, style: TextStyle) -> str:
     return f"\033[{style.value}m{text}\033[{TextStyle.RESET.value}m"
 
 def get_log_file_path() -> str:
-    default_log_file_path = "/var/lib/marzban/access.log"
+    default_log_file_path = "/var/lib/remna/access.log"
     
     # Если файл существует по дефолтному пути, возвращаем его без вопросов (для автоматизации)
     # Если вы хотите всегда спрашивать - раскомментируйте input ниже, но для pipe это может быть неудобно
